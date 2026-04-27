@@ -25,7 +25,7 @@ export function GlobeController({ videoEl, showDebug }: GlobeControllerProps) {
   }, []);
 
   const { gestureStateRef, processResult } = useGestureState(onGestureChange);
-  const { controlsRef, applyDelta, applyZoom, applyTwoHandZoom } = useGlobeControls();
+  const { controlsRef, applyDelta, applyZoomVelocity, applyTwoHandZoom } = useGlobeControls();
 
   const handleResult = useCallback(
     (result: HandLandmarkerResult) => {
@@ -36,12 +36,12 @@ export function GlobeController({ videoEl, showDebug }: GlobeControllerProps) {
       if (state.gesture === 'open-palm') {
         applyDelta(state.deltaX, state.deltaY);
       } else if (state.gesture === 'pinch') {
-        applyZoom(state.zoom);
+        applyZoomVelocity(state.zoom);
       } else if (state.gesture === 'two-hand-spread' && state.twoHandDistance !== null) {
         applyTwoHandZoom(state.twoHandDistance);
       }
     },
-    [processResult, gestureStateRef, applyDelta, applyZoom, applyTwoHandZoom],
+    [processResult, gestureStateRef, applyDelta, applyZoomVelocity, applyTwoHandZoom],
   );
 
   useHandLandmarker({ videoEl, onResult: handleResult, enabled: !!videoEl });

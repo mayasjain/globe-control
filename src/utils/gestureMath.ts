@@ -16,14 +16,14 @@ export const LM = {
 
 // ── Tunable thresholds ────────────────────────────────────────────────────────
 export const THRESHOLDS = {
-  PINCH_CLOSED: 0.05,        // normalized dist thumb↔index = pinch
-  PINCH_OPEN: 0.10,          // hysteresis: above this = released
-  FIST_MAX_FINGERTIP_Y: 0,   // fingertip above knuckle threshold (y is inverted)
-  DEAD_ZONE: 0.006,          // per-frame velocity dead zone (small)
-  PALM_SENSITIVITY: 0.35,    // velocity multiplier for palm → globe delta (per-frame)
-  ZOOM_SENSITIVITY: 1.2,     // multiplier for pinch → zoom
-  GESTURE_CONFIRM_FRAMES: 5, // hysteresis: frames before gesture transitions
-  SMOOTHING_ALPHA: 0.12,     // EMA smoothing (lower = smoother, slower)
+  PINCH_ENTER: 0.07,         // enter pinch when thumb↔index < this
+  PINCH_EXIT:  0.22,         // exit pinch when thumb↔index > this (hysteresis)
+  DEAD_ZONE: 0.003,          // per-frame velocity dead zone
+  PALM_SENSITIVITY: 0.85,    // velocity multiplier for palm swipe → rotation
+  PINCH_ZOOM_SENSITIVITY: 6, // pinch distance velocity → altitude change
+  TWO_HAND_SENSITIVITY: 8,   // two-hand spread velocity → altitude change
+  GESTURE_CONFIRM_FRAMES: 3,
+  SMOOTHING_ALPHA: 0.18,
 };
 
 // ── Math helpers ──────────────────────────────────────────────────────────────
@@ -41,8 +41,12 @@ export function applyDeadZone(v: number, zone: number): number {
 }
 
 // ── Gesture detectors ─────────────────────────────────────────────────────────
+export function pinchDistance(lm: HandLandmarks): number {
+  return dist2D(lm[LM.THUMB_TIP], lm[LM.INDEX_TIP]);
+}
+/** Stateless quick check used during calibration only */
 export function isPinching(lm: HandLandmarks): boolean {
-  return dist2D(lm[LM.THUMB_TIP], lm[LM.INDEX_TIP]) < THRESHOLDS.PINCH_CLOSED;
+  return pinchDistance(lm) < THRESHOLDS.PINCH_ENTER;
 }
 
 /**

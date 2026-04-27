@@ -52,11 +52,10 @@ export function PermissionGate({ onGranted }: PermissionGateProps) {
           {loading ? 'Starting camera…' : 'Enable Camera'}
         </button>
 
-        <div className="mt-10 text-white/25 text-xs space-y-1">
-          <p>🖐 Open palm — rotate</p>
-          <p>🤌 Pinch — zoom</p>
-          <p>✊ Fist — pause</p>
-          <p>↔ Two hands apart/together — zoom</p>
+        <div className="mt-10 text-white/40 text-xs space-y-1">
+          <p>🖐 Swipe with open palm — rotate</p>
+          <p>🤌 Pinch in / out — zoom</p>
+          <p>↔ Two hands apart / together — zoom</p>
         </div>
       </div>
     </div>

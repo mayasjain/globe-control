@@ -3,18 +3,18 @@ import type { GestureType } from '../types/gestures';
 
 const GESTURE_LABELS: Record<GestureType, string> = {
   'idle':            '· · ·',
-  'open-palm':       '🖐 Rotate',
-  'pinch':           '🤌 Zoom',
-  'fist':            '✊ Paused',
-  'two-hand-spread': '↔ Zoom',
+  'open-palm':       '🖐 Swipe to rotate',
+  'pinch':           '🤌 Pinch to zoom',
+  'fist':            '· · ·',
+  'two-hand-spread': '↔ Zoom (two hands)',
 };
 
 const GESTURE_COLORS: Record<GestureType, string> = {
-  'idle':            'text-white/30',
-  'open-palm':       'text-emerald-400',
-  'pinch':           'text-sky-400',
-  'fist':            'text-rose-400',
-  'two-hand-spread': 'text-amber-400',
+  'idle':            'text-white/40',
+  'open-palm':       'text-emerald-300',
+  'pinch':           'text-sky-300',
+  'fist':            'text-white/40',
+  'two-hand-spread': 'text-amber-300',
 };
 
 interface GestureOverlayProps {

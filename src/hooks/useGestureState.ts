@@ -2,14 +2,12 @@ import { useRef, useCallback, useEffect } from 'react';
 import type { HandLandmarkerResult } from '@mediapipe/tasks-vision';
 import type { GestureType, GestureState } from '../types/gestures';
 import {
-  isPinching,
   isOpenPalm,
-  isFist,
+  pinchDistance,
   palmCenter,
   dist2D,
   applyDeadZone,
   THRESHOLDS,
-  LM,
 } from '../utils/gestureMath';
 import { EMA } from '../utils/smoothing';
 
@@ -29,25 +27,26 @@ export function useGestureState(
     twoHandDistance: null,
   });
 
-  // Smoothers — lower alpha = more lag, less jitter
   const smoothX = useRef(new EMA(0.5, THRESHOLDS.SMOOTHING_ALPHA));
   const smoothY = useRef(new EMA(0.5, THRESHOLDS.SMOOTHING_ALPHA));
-  const smoothZoom = useRef(new EMA(0.5, THRESHOLDS.SMOOTHING_ALPHA));
+  const smoothPinch = useRef(new EMA(0.15, THRESHOLDS.SMOOTHING_ALPHA));
   const smoothTwoHand = useRef(new EMA(0, THRESHOLDS.SMOOTHING_ALPHA));
 
-  // Last smoothed positions (for velocity computation)
+  // Per-frame velocity tracking
   const lastX = useRef<number | null>(null);
   const lastY = useRef<number | null>(null);
+  const lastPinch = useRef<number | null>(null);
   const lastTwoHand = useRef<number | null>(null);
 
-  // Hysteresis
+  // Stateful pinch with hysteresis
+  const isPinchActive = useRef(false);
+
+  const onChangeRef = useRef(onGestureChange);
+  useEffect(() => { onChangeRef.current = onGestureChange; }, [onGestureChange]);
+
   const pendingGesture = useRef<GestureType>('idle');
   const pendingCount = useRef(0);
   const currentGesture = useRef<GestureType>('idle');
-
-  // Keep latest onGestureChange in a ref so processResult identity stays stable
-  const onChangeRef = useRef(onGestureChange);
-  useEffect(() => { onChangeRef.current = onGestureChange; }, [onGestureChange]);
 
   function confirmGesture(raw: GestureType): GestureType {
     if (raw === currentGesture.current) {
@@ -60,9 +59,10 @@ export function useGestureState(
         pendingCount.current = 0;
         currentGesture.current = raw;
         onChangeRef.current(raw);
-        // Reset velocity tracking on transition so a stale "last" doesn't cause a jump
+        // Reset velocity tracking on transition
         lastX.current = null;
         lastY.current = null;
+        lastPinch.current = null;
         lastTwoHand.current = null;
       }
     } else {
@@ -77,58 +77,49 @@ export function useGestureState(
 
     if (!hands || hands.length === 0) {
       confirmGesture('idle');
-      gestureStateRef.current = {
-        gesture: 'idle',
-        deltaX: 0,
-        deltaY: 0,
-        zoom: gestureStateRef.current.zoom,
-        twoHandDistance: null,
-      };
-      lastX.current = null;
-      lastY.current = null;
-      lastTwoHand.current = null;
+      isPinchActive.current = false;
+      lastX.current = lastY.current = lastPinch.current = lastTwoHand.current = null;
+      gestureStateRef.current = { gesture: 'idle', deltaX: 0, deltaY: 0, zoom: 0, twoHandDistance: null };
       return;
     }
 
     const lm0 = hands[0];
 
-    // ── Two-hand spread detection ──
+    // ── Two-hand spread → zoom ──
     if (hands.length === 2) {
+      isPinchActive.current = false;
       const c0 = palmCenter(hands[0]);
       const c1 = palmCenter(hands[1]);
-      const rawDist = dist2D(
-        { x: c0.x, y: c0.y, z: 0 },
-        { x: c1.x, y: c1.y, z: 0 },
-      );
+      const rawDist = dist2D({ x: c0.x, y: c0.y, z: 0 }, { x: c1.x, y: c1.y, z: 0 });
       const smoothed = smoothTwoHand.current.update(rawDist);
-
       let velocity = 0;
       if (lastTwoHand.current !== null) {
-        velocity = (smoothed - lastTwoHand.current) * THRESHOLDS.ZOOM_SENSITIVITY;
+        velocity = (smoothed - lastTwoHand.current) * THRESHOLDS.TWO_HAND_SENSITIVITY;
         velocity = applyDeadZone(velocity, THRESHOLDS.DEAD_ZONE);
       }
       lastTwoHand.current = smoothed;
-
       confirmGesture('two-hand-spread');
       gestureStateRef.current = {
-        gesture: 'two-hand-spread',
-        deltaX: 0,
-        deltaY: 0,
-        zoom: gestureStateRef.current.zoom,
-        twoHandDistance: velocity,
+        gesture: 'two-hand-spread', deltaX: 0, deltaY: 0, zoom: 0, twoHandDistance: velocity,
       };
       return;
     }
     lastTwoHand.current = null;
 
-    // ── Single-hand classification ──
-    // Order: pinch > open-palm > fist > idle.
-    // Pinch first (most specific). Palm next. Fist last + must be strict (all 4 curled)
-    // so it doesn't trigger from a relaxed hand.
+    // ── Stateful pinch detection (hysteresis) ──
+    const rawPinch = pinchDistance(lm0);
+    const smoothedPinch = smoothPinch.current.update(rawPinch);
+
+    if (!isPinchActive.current && smoothedPinch < THRESHOLDS.PINCH_ENTER) {
+      isPinchActive.current = true;
+      lastPinch.current = smoothedPinch;
+    } else if (isPinchActive.current && smoothedPinch > THRESHOLDS.PINCH_EXIT) {
+      isPinchActive.current = false;
+    }
+
     let rawGesture: GestureType = 'idle';
-    if (isPinching(lm0)) rawGesture = 'pinch';
+    if (isPinchActive.current) rawGesture = 'pinch';
     else if (isOpenPalm(lm0)) rawGesture = 'open-palm';
-    else if (isFist(lm0)) rawGesture = 'fist';
 
     const gesture = confirmGesture(rawGesture);
 
@@ -137,7 +128,6 @@ export function useGestureState(
     const sy = smoothY.current.update(palm.y);
 
     if (gesture === 'open-palm') {
-      // Per-frame velocity: change since last frame
       let vx = 0, vy = 0;
       if (lastX.current !== null && lastY.current !== null) {
         vx = (sx - lastX.current) * THRESHOLDS.PALM_SENSITIVITY;
@@ -145,33 +135,30 @@ export function useGestureState(
         vx = applyDeadZone(vx, THRESHOLDS.DEAD_ZONE);
         vy = applyDeadZone(vy, THRESHOLDS.DEAD_ZONE);
       }
-      lastX.current = sx;
-      lastY.current = sy;
-
+      lastX.current = sx; lastY.current = sy;
       gestureStateRef.current = {
-        gesture,
-        deltaX: -vx, // mirror compensation
-        deltaY: vy,
-        zoom: gestureStateRef.current.zoom,
-        twoHandDistance: null,
+        gesture, deltaX: -vx, deltaY: vy, zoom: 0, twoHandDistance: null,
       };
     } else if (gesture === 'pinch') {
-      const rawDist = dist2D(lm0[LM.THUMB_TIP], lm0[LM.INDEX_TIP]);
-      const smoothedDist = smoothZoom.current.update(rawDist);
-      const zoom = Math.max(0, Math.min(1, smoothedDist / THRESHOLDS.PINCH_OPEN));
-      lastX.current = null;
-      lastY.current = null;
+      // Velocity-based pinch zoom: distance decreasing = zoom in (negative altitude delta)
+      let zoomVel = 0;
+      if (lastPinch.current !== null) {
+        // Inverted: closing pinch (negative delta) → zoom IN → negative altitude change
+        zoomVel = (smoothedPinch - lastPinch.current) * THRESHOLDS.PINCH_ZOOM_SENSITIVITY;
+        zoomVel = applyDeadZone(zoomVel, THRESHOLDS.DEAD_ZONE);
+      }
+      lastPinch.current = smoothedPinch;
+      lastX.current = lastY.current = null;
       gestureStateRef.current = {
-        gesture, deltaX: 0, deltaY: 0, zoom, twoHandDistance: null,
+        gesture, deltaX: 0, deltaY: 0, zoom: zoomVel, twoHandDistance: null,
       };
     } else {
-      lastX.current = null;
-      lastY.current = null;
+      lastX.current = lastY.current = lastPinch.current = null;
       gestureStateRef.current = {
-        gesture, deltaX: 0, deltaY: 0, zoom: gestureStateRef.current.zoom, twoHandDistance: null,
+        gesture, deltaX: 0, deltaY: 0, zoom: 0, twoHandDistance: null,
       };
     }
-  }, []); // stable — uses refs internally
+  }, []);
 
   return { gestureStateRef, processResult };
 }

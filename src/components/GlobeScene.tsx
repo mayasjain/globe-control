@@ -19,11 +19,11 @@ function GlobeInner({ controlsRef, markers }: GlobeInnerProps) {
 
   useEffect(() => {
     const globe = new ThreeGlobe({ animateIn: true })
-      .globeImageUrl('//unpkg.com/three-globe/example/img/earth-blue-marble.jpg')
+      .globeImageUrl('//unpkg.com/three-globe/example/img/earth-day.jpg')
       .bumpImageUrl('//unpkg.com/three-globe/example/img/earth-topology.png')
       .showAtmosphere(true)
-      .atmosphereColor('#5fa8ff')
-      .atmosphereAltitude(0.22)
+      .atmosphereColor('#a5d8ff')
+      .atmosphereAltitude(0.28)
       .pointsData(markers)
       .pointLat((d) => (d as GlobeMarker).lat)
       .pointLng((d) => (d as GlobeMarker).lng)
@@ -41,8 +41,8 @@ function GlobeInner({ controlsRef, markers }: GlobeInnerProps) {
 
     // Tighten material for crisper visuals
     const globeMaterial = globe.globeMaterial() as THREE.MeshPhongMaterial;
-    globeMaterial.shininess = 6;
-    globeMaterial.specular = new THREE.Color('#222a44');
+    globeMaterial.shininess = 12;
+    globeMaterial.specular = new THREE.Color('#445e88');
 
     scene.add(globe);
     globeRef.current = globe;
@@ -89,12 +89,16 @@ export function GlobeScene({ controlsRef, markers }: GlobeSceneProps) {
     <Canvas
       camera={{ position: [0, 0, 350], fov: 45, near: 0.1, far: 5000 }}
       gl={{ antialias: true, powerPreference: 'high-performance' }}
-      style={{ background: 'radial-gradient(ellipse at center, #050816 0%, #000000 70%)' }}
+      style={{
+        background:
+          'radial-gradient(ellipse at 50% 40%, #4a6a9c 0%, #2a3e5e 35%, #14213a 70%, #0a1326 100%)',
+      }}
     >
-      <ambientLight intensity={0.35} color="#a4b4ff" />
-      <directionalLight position={[200, 100, 200]} intensity={1.4} color="#ffffff" />
-      <directionalLight position={[-150, -80, -100]} intensity={0.4} color="#3050ff" />
-      <Stars radius={800} depth={120} count={9000} factor={6} saturation={0} fade speed={0.4} />
+      <ambientLight intensity={0.95} color="#dbe7ff" />
+      <directionalLight position={[250, 180, 220]} intensity={1.6} color="#ffffff" />
+      <directionalLight position={[-200, -100, -150]} intensity={0.55} color="#88aaff" />
+      <hemisphereLight color="#cfe0ff" groundColor="#1a2540" intensity={0.5} />
+      <Stars radius={900} depth={120} count={5000} factor={4} saturation={0} fade speed={0.3} />
       <GlobeInner controlsRef={controlsRef} markers={markers} />
     </Canvas>
   );

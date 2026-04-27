@@ -2,19 +2,18 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import type { HandLandmarkerResult } from '@mediapipe/tasks-vision';
 import { useHandLandmarker } from '../hooks/useHandLandmarker';
 import { drawLandmarks, clearCanvas } from '../utils/landmarkUtils';
-import { isPinching, isOpenPalm, isFist } from '../utils/gestureMath';
+import { isPinching, isOpenPalm } from '../utils/gestureMath';
 import type { HandLandmarks } from '../types/mediapipe';
 
-type Step = 'detecting' | 'open-palm' | 'pinch' | 'fist' | 'done';
+type Step = 'detecting' | 'open-palm' | 'pinch' | 'done';
 
-const STEP_ORDER: Step[] = ['detecting', 'open-palm', 'pinch', 'fist', 'done'];
+const STEP_ORDER: Step[] = ['detecting', 'open-palm', 'pinch', 'done'];
 
 const STEP_INSTRUCTIONS: Record<Step, { title: string; hint: string; emoji: string }> = {
-  'detecting': { title: 'Show your hand',     hint: 'Hold your hand in view of the camera.',                emoji: '👋' },
-  'open-palm': { title: 'Open palm',          hint: 'Spread all five fingers, palm facing the camera.',     emoji: '🖐' },
-  'pinch':     { title: 'Pinch',              hint: 'Touch your thumb and index fingertip together.',       emoji: '🤌' },
-  'fist':      { title: 'Fist',               hint: 'Curl all fingers into a closed fist.',                  emoji: '✊' },
-  'done':      { title: "You're all set",     hint: 'All gestures recognized. Ready to launch the globe.',  emoji: '✨' },
+  'detecting': { title: 'Show your hand',  hint: 'Hold your hand in view of the camera.',              emoji: '👋' },
+  'open-palm': { title: 'Open palm',       hint: 'Spread all five fingers, palm facing the camera.',   emoji: '🖐' },
+  'pinch':     { title: 'Pinch',           hint: 'Touch your thumb and index fingertip together.',     emoji: '🤌' },
+  'done':      { title: "You're all set",  hint: 'Gestures recognized. Ready to launch the globe.',    emoji: '✨' },
 };
 
 const HOLD_FRAMES_REQUIRED = 12; // ~0.4s at 30fps
@@ -60,7 +59,6 @@ export function CalibrationScreen({ videoEl, onComplete }: CalibrationScreenProp
     if (current === 'detecting') pass = !!lm;
     else if (current === 'open-palm' && lm) pass = isOpenPalm(lm);
     else if (current === 'pinch' && lm) pass = isPinching(lm);
-    else if (current === 'fist' && lm) pass = isFist(lm);
 
     if (pass) {
       holdRef.current = Math.min(HOLD_FRAMES_REQUIRED, holdRef.current + 1);

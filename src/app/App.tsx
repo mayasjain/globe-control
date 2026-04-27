@@ -31,11 +31,10 @@ export default function App() {
         <>
           <GlobeController videoEl={videoEl} showDebug={showDebug} />
 
-          <div className="fixed bottom-5 left-5 z-10 text-white/30 text-xs space-y-1 pointer-events-none">
-            <p>🖐 Open palm — rotate</p>
-            <p>🤌 Pinch — zoom</p>
-            <p>✊ Fist — pause</p>
-            <p>↔ Two hands — zoom</p>
+          <div className="fixed bottom-5 left-5 z-10 text-white/50 text-xs space-y-1 pointer-events-none">
+            <p>🖐 Open palm — swipe to rotate</p>
+            <p>🤌 Pinch in / out — zoom</p>
+            <p>↔ Two hands apart — zoom</p>
           </div>
 
           <button
