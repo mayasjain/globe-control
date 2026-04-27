@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useEffect } from 'react';
 import type { HandLandmarkerResult } from '@mediapipe/tasks-vision';
 import type { GestureType, GestureState } from '../types/gestures';
 import {
@@ -45,6 +45,10 @@ export function useGestureState(
   const pendingCount = useRef(0);
   const currentGesture = useRef<GestureType>('idle');
 
+  // Keep latest onGestureChange in a ref so processResult identity stays stable
+  const onChangeRef = useRef(onGestureChange);
+  useEffect(() => { onChangeRef.current = onGestureChange; }, [onGestureChange]);
+
   function confirmGesture(raw: GestureType): GestureType {
     if (raw === currentGesture.current) {
       pendingCount.current = 0;
@@ -55,7 +59,7 @@ export function useGestureState(
       if (pendingCount.current >= THRESHOLDS.GESTURE_CONFIRM_FRAMES) {
         pendingCount.current = 0;
         currentGesture.current = raw;
-        onGestureChange(raw);
+        onChangeRef.current(raw);
         // Reset velocity tracking on transition so a stale "last" doesn't cause a jump
         lastX.current = null;
         lastY.current = null;
@@ -167,7 +171,7 @@ export function useGestureState(
         gesture, deltaX: 0, deltaY: 0, zoom: gestureStateRef.current.zoom, twoHandDistance: null,
       };
     }
-  }, [onGestureChange]);
+  }, []); // stable — uses refs internally
 
   return { gestureStateRef, processResult };
 }

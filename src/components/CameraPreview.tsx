@@ -16,6 +16,8 @@ export function CameraPreview({ videoEl, landmarksRef }: CameraPreviewProps) {
   useEffect(() => {
     if (!videoEl || !containerRef.current) return;
     containerRef.current.appendChild(videoEl);
+    // Ensure playback resumes after DOM move (some browsers pause it)
+    videoEl.play().catch(() => { /* ignore — already playing */ });
     return () => {
       videoEl.parentNode?.removeChild(videoEl);
     };

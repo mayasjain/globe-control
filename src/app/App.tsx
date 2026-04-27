@@ -8,7 +8,7 @@ type Phase = 'permission' | 'calibration' | 'globe';
 export default function App() {
   const [phase, setPhase] = useState<Phase>('permission');
   const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
-  const [showDebug, setShowDebug] = useState(false);
+  const [showDebug, setShowDebug] = useState(true); // default-on for diagnosis
 
   const handleGranted = useCallback((el: HTMLVideoElement) => {
     setVideoEl(el);
