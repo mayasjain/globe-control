@@ -39,7 +39,17 @@ function GlobeInner({ controlsRef, markers, tick }: GlobeInnerProps) {
       .ringColor(() => (t: number) => `rgba(96, 165, 250, ${1 - t})`)
       .ringMaxRadius(3)
       .ringPropagationSpeed(2)
-      .ringRepeatPeriod(1500);
+      .ringRepeatPeriod(1500)
+      .labelsData(markers)
+      .labelLat((d) => (d as GlobeMarker).lat)
+      .labelLng((d) => (d as GlobeMarker).lng)
+      .labelText((d) => (d as GlobeMarker).label)
+      .labelColor(() => '#ffffff')
+      .labelSize(0.6)
+      .labelDotRadius(0.25)
+      .labelDotOrientation(() => 'bottom')
+      .labelAltitude(0.012)
+      .labelResolution(3);
 
     // Tighten material for crisper visuals
     const globeMaterial = globe.globeMaterial() as THREE.MeshPhongMaterial;
