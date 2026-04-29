@@ -11,15 +11,17 @@ const GLOBE_RADIUS = 100; // three-globe default
 interface GlobeInnerProps {
   controlsRef: React.MutableRefObject<GlobeControlValues>;
   markers: GlobeMarker[];
+  tick: (dt: number) => void;
 }
 
-function GlobeInner({ controlsRef, markers }: GlobeInnerProps) {
+function GlobeInner({ controlsRef, markers, tick }: GlobeInnerProps) {
   const { scene, camera } = useThree();
   const globeRef = useRef<ThreeGlobe | null>(null);
+  const cloudsRef = useRef<THREE.Mesh | null>(null);
 
   useEffect(() => {
     const globe = new ThreeGlobe({ animateIn: true })
-      .globeImageUrl('//unpkg.com/three-globe/example/img/earth-day.jpg')
+      .globeImageUrl('//unpkg.com/three-globe/example/img/earth-blue-marble.jpg')
       .bumpImageUrl('//unpkg.com/three-globe/example/img/earth-topology.png')
       .showAtmosphere(true)
       .atmosphereColor('#a5d8ff')
@@ -47,14 +49,36 @@ function GlobeInner({ controlsRef, markers }: GlobeInnerProps) {
     scene.add(globe);
     globeRef.current = globe;
 
+    // Cloud layer: a transparent sphere just above the surface, slowly rotating
+    const cloudsTex = new THREE.TextureLoader().load(
+      'https://unpkg.com/three-globe/example/img/clouds.png',
+    );
+    const cloudsGeom = new THREE.SphereGeometry(GLOBE_RADIUS * 1.012, 64, 64);
+    const cloudsMat = new THREE.MeshPhongMaterial({
+      map: cloudsTex,
+      transparent: true,
+      opacity: 0.4,
+      depthWrite: false,
+    });
+    const clouds = new THREE.Mesh(cloudsGeom, cloudsMat);
+    scene.add(clouds);
+    cloudsRef.current = clouds;
+
     return () => {
       scene.remove(globe);
       globe.clear();
+      scene.remove(clouds);
+      cloudsGeom.dispose();
+      cloudsMat.dispose();
+      cloudsTex.dispose();
+      cloudsRef.current = null;
     };
   }, [scene, markers]);
 
-  useFrame(() => {
+  useFrame((_, dt) => {
     if (!globeRef.current) return;
+    tick(dt);
+    if (cloudsRef.current) cloudsRef.current.rotation.y += dt * 0.012;
     const { lat, lng, altitude } = controlsRef.current;
 
     const phi = (90 - lat) * (Math.PI / 180);
@@ -82,9 +106,10 @@ function GlobeInner({ controlsRef, markers }: GlobeInnerProps) {
 interface GlobeSceneProps {
   controlsRef: React.MutableRefObject<GlobeControlValues>;
   markers: GlobeMarker[];
+  tick: (dt: number) => void;
 }
 
-export function GlobeScene({ controlsRef, markers }: GlobeSceneProps) {
+export function GlobeScene({ controlsRef, markers, tick }: GlobeSceneProps) {
   return (
     <Canvas
       camera={{ position: [0, 0, 350], fov: 45, near: 0.1, far: 5000 }}
@@ -99,7 +124,7 @@ export function GlobeScene({ controlsRef, markers }: GlobeSceneProps) {
       <directionalLight position={[-200, -100, -150]} intensity={0.55} color="#88aaff" />
       <hemisphereLight color="#cfe0ff" groundColor="#1a2540" intensity={0.5} />
       <Stars radius={900} depth={120} count={5000} factor={4} saturation={0} fade speed={0.3} />
-      <GlobeInner controlsRef={controlsRef} markers={markers} />
+      <GlobeInner controlsRef={controlsRef} markers={markers} tick={tick} />
     </Canvas>
   );
 }

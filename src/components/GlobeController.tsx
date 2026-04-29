@@ -25,7 +25,7 @@ export function GlobeController({ videoEl, showDebug }: GlobeControllerProps) {
   }, []);
 
   const { gestureStateRef, processResult } = useGestureState(onGestureChange);
-  const { controlsRef, applyDelta, applyZoomVelocity, applyTwoHandZoom } = useGlobeControls();
+  const { controlsRef, applyDelta, applyZoomVelocity, applyTwoHandZoom, tick } = useGlobeControls();
 
   const handleResult = useCallback(
     (result: HandLandmarkerResult) => {
@@ -48,7 +48,7 @@ export function GlobeController({ videoEl, showDebug }: GlobeControllerProps) {
 
   return (
     <>
-      <GlobeScene controlsRef={controlsRef} markers={GLOBE_MARKERS} />
+      <GlobeScene controlsRef={controlsRef} markers={GLOBE_MARKERS} tick={tick} />
       <CameraPreview videoEl={videoEl} landmarksRef={landmarksRef} />
       <GestureOverlay gestureRef={activeGestureRef} />
       {showDebug && (

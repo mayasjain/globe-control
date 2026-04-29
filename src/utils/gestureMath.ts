@@ -23,7 +23,9 @@ export const THRESHOLDS = {
   PINCH_ZOOM_SENSITIVITY: 6, // pinch distance velocity → altitude change
   TWO_HAND_SENSITIVITY: 8,   // two-hand spread velocity → altitude change
   GESTURE_CONFIRM_FRAMES: 3,
-  SMOOTHING_ALPHA: 0.18,
+  SMOOTHING_ALPHA: 0.25,
+  TAU_ROT: 0.12, // seconds — rotation glide time constant
+  TAU_ALT: 0.18, // seconds — zoom glide time constant
 };
 
 // ── Math helpers ──────────────────────────────────────────────────────────────
