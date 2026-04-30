@@ -1,127 +1,19 @@
 import { useEffect, useRef } from 'react';
-import * as THREE from 'three';
-import ThreeGlobe from 'three-globe';
-import { Canvas, useThree, useFrame } from '@react-three/fiber';
-import { Stars } from '@react-three/drei';
+import maplibregl, { Map as MapLibreMap, type StyleSpecification } from 'maplibre-gl';
 import type { GlobeControlValues } from '../hooks/useGlobeControls';
 import type { GlobeMarker } from '../data/globeMarkers';
 
-const GLOBE_RADIUS = 100; // three-globe default
+const ALT_REF = 2.5;
+const ZOOM_AT_REF = 1.5;
+const MIN_ZOOM = 0;
+const MAX_ZOOM = 16;
 
-interface GlobeInnerProps {
-  controlsRef: React.MutableRefObject<GlobeControlValues>;
-  markers: GlobeMarker[];
-  tick: (dt: number) => void;
-  isGrabbingRef?: React.MutableRefObject<boolean>;
+function altitudeToZoom(altitude: number): number {
+  const z = ZOOM_AT_REF - Math.log2(altitude / ALT_REF);
+  return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z));
 }
 
-function GlobeInner({ controlsRef, markers, tick, isGrabbingRef }: GlobeInnerProps) {
-  const { scene, camera } = useThree();
-  const globeRef = useRef<ThreeGlobe | null>(null);
-  const cloudsRef = useRef<THREE.Mesh | null>(null);
-
-  useEffect(() => {
-    const globe = new ThreeGlobe({ animateIn: true })
-      .globeImageUrl('//unpkg.com/three-globe/example/img/earth-blue-marble.jpg')
-      .bumpImageUrl('//unpkg.com/three-globe/example/img/earth-topology.png')
-      .showAtmosphere(true)
-      .atmosphereColor('#a5d8ff')
-      .atmosphereAltitude(0.28)
-      .pointsData(markers)
-      .pointLat((d) => (d as GlobeMarker).lat)
-      .pointLng((d) => (d as GlobeMarker).lng)
-      .pointColor((d) => (d as GlobeMarker).color)
-      .pointRadius((d) => (d as GlobeMarker).size)
-      .pointAltitude(0.01)
-      .pointsMerge(true)
-      .ringsData(markers)
-      .ringLat((d) => (d as GlobeMarker).lat)
-      .ringLng((d) => (d as GlobeMarker).lng)
-      .ringColor(() => (t: number) => `rgba(96, 165, 250, ${1 - t})`)
-      .ringMaxRadius(3)
-      .ringPropagationSpeed(2)
-      .ringRepeatPeriod(1500)
-      .labelsData(markers)
-      .labelLat((d) => (d as GlobeMarker).lat)
-      .labelLng((d) => (d as GlobeMarker).lng)
-      .labelText((d) => (d as GlobeMarker).label)
-      .labelColor(() => '#ffffff')
-      .labelSize(0.6)
-      .labelDotRadius(0.25)
-      .labelDotOrientation(() => 'bottom')
-      .labelAltitude(0.012)
-      .labelResolution(3);
-
-    // Tighten material for crisper visuals
-    const globeMaterial = globe.globeMaterial() as THREE.MeshPhongMaterial;
-    globeMaterial.shininess = 12;
-    globeMaterial.specular = new THREE.Color('#445e88');
-
-    scene.add(globe);
-    globeRef.current = globe;
-
-    // Cloud layer: a transparent sphere just above the surface, slowly rotating
-    const cloudsTex = new THREE.TextureLoader().load(
-      'https://unpkg.com/three-globe/example/img/clouds.png',
-    );
-    const cloudsGeom = new THREE.SphereGeometry(GLOBE_RADIUS * 1.012, 64, 64);
-    const cloudsMat = new THREE.MeshPhongMaterial({
-      map: cloudsTex,
-      transparent: true,
-      opacity: 0.4,
-      depthWrite: false,
-    });
-    const clouds = new THREE.Mesh(cloudsGeom, cloudsMat);
-    scene.add(clouds);
-    cloudsRef.current = clouds;
-
-    return () => {
-      scene.remove(globe);
-      globe.clear();
-      scene.remove(clouds);
-      cloudsGeom.dispose();
-      cloudsMat.dispose();
-      cloudsTex.dispose();
-      cloudsRef.current = null;
-    };
-  }, [scene, markers]);
-
-  useFrame((_, dt) => {
-    if (!globeRef.current) return;
-    tick(dt);
-    if (cloudsRef.current) cloudsRef.current.rotation.y += dt * 0.012;
-
-    // Grab affordance: when held, lift the atmosphere slightly so the user
-    // sees the globe respond. Cheap and unambiguous.
-    if (isGrabbingRef && globeRef.current) {
-      const targetAlt = isGrabbingRef.current ? 0.36 : 0.28;
-      const cur = globeRef.current.atmosphereAltitude();
-      globeRef.current.atmosphereAltitude(cur + (targetAlt - cur) * Math.min(1, dt * 6));
-    }
-
-    const { lat, lng, altitude } = controlsRef.current;
-
-    const phi = (90 - lat) * (Math.PI / 180);
-    const theta = (lng + 180) * (Math.PI / 180);
-    const radius = GLOBE_RADIUS * (1 + altitude);
-
-    camera.position.set(
-      -radius * Math.sin(phi) * Math.cos(theta),
-       radius * Math.cos(phi),
-       radius * Math.sin(phi) * Math.sin(theta),
-    );
-    camera.lookAt(0, 0, 0);
-
-    // Adjust near plane for very close zoom-in so we don't clip the globe surface
-    if ('near' in camera) {
-      const persp = camera as THREE.PerspectiveCamera;
-      persp.near = Math.max(0.1, GLOBE_RADIUS * altitude * 0.3);
-      persp.updateProjectionMatrix();
-    }
-  });
-
-  return null;
-}
+const STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
 
 interface GlobeSceneProps {
   controlsRef: React.MutableRefObject<GlobeControlValues>;
@@ -131,21 +23,142 @@ interface GlobeSceneProps {
 }
 
 export function GlobeScene({ controlsRef, markers, tick, isGrabbingRef }: GlobeSceneProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<MapLibreMap | null>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    console.log('[GlobeScene] mount', containerRef.current);
+    if (!containerRef.current) return;
+
+    const initial = controlsRef.current;
+    let map: MapLibreMap;
+    try {
+      map = new maplibregl.Map({
+        container: containerRef.current,
+        style: STYLE_URL as unknown as StyleSpecification,
+        center: [initial.lng, initial.lat],
+        zoom: altitudeToZoom(initial.altitude),
+        interactive: false,
+        attributionControl: { compact: true },
+      });
+    } catch (err) {
+      console.error('[MapLibre] constructor threw', err);
+      return;
+    }
+    mapRef.current = map;
+    console.log('[GlobeScene] map created', {
+      w: containerRef.current.clientWidth,
+      h: containerRef.current.clientHeight,
+    });
+    requestAnimationFrame(() => map.resize());
+
+    map.on('error', (e) => {
+      console.error('[MapLibre]', e?.error ?? e);
+    });
+
+    map.on('load', () => console.log('[MapLibre] load'));
+
+    map.on('style.load', () => {
+      console.log('[MapLibre] style.load');
+      try {
+        map.setProjection({ type: 'globe' });
+      } catch (err) {
+        console.warn('[MapLibre] setProjection failed', err);
+      }
+
+      // Highlight curated markers as a small pulsing circle layer on top of OSM labels.
+      if (markers.length > 0) {
+        const fc = {
+          type: 'FeatureCollection' as const,
+          features: markers.map((m) => ({
+            type: 'Feature' as const,
+            geometry: { type: 'Point' as const, coordinates: [m.lng, m.lat] },
+            properties: { label: m.label, color: m.color, size: m.size },
+          })),
+        };
+        if (!map.getSource('curated-markers')) {
+          map.addSource('curated-markers', { type: 'geojson', data: fc });
+          map.addLayer({
+            id: 'curated-markers-glow',
+            type: 'circle',
+            source: 'curated-markers',
+            paint: {
+              'circle-radius': 14,
+              'circle-color': ['get', 'color'],
+              'circle-opacity': 0.18,
+              'circle-blur': 0.6,
+            },
+          });
+          map.addLayer({
+            id: 'curated-markers-dot',
+            type: 'circle',
+            source: 'curated-markers',
+            paint: {
+              'circle-radius': 5,
+              'circle-color': ['get', 'color'],
+              'circle-stroke-color': '#ffffff',
+              'circle-stroke-width': 1.5,
+              'circle-opacity': 0.95,
+            },
+          });
+        }
+      }
+    });
+
+    let rafId = 0;
+    let lastT = performance.now();
+    const loop = (now: number) => {
+      const dt = Math.min(0.1, (now - lastT) / 1000);
+      lastT = now;
+      tick(dt);
+
+      const { lat, lng, altitude } = controlsRef.current;
+      const zoom = altitudeToZoom(altitude);
+      map.jumpTo({ center: [lng, lat], zoom });
+
+      if (overlayRef.current && isGrabbingRef) {
+        const target = isGrabbingRef.current ? 1 : 0;
+        const cur = parseFloat(overlayRef.current.dataset.intensity ?? '0');
+        const next = cur + (target - cur) * Math.min(1, dt * 6);
+        overlayRef.current.dataset.intensity = String(next);
+        overlayRef.current.style.opacity = String(next * 0.55);
+      }
+
+      rafId = requestAnimationFrame(loop);
+    };
+    rafId = requestAnimationFrame(loop);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      map.remove();
+      mapRef.current = null;
+    };
+  }, [controlsRef, tick, isGrabbingRef, markers]);
+
   return (
-    <Canvas
-      camera={{ position: [0, 0, 350], fov: 45, near: 0.1, far: 5000 }}
-      gl={{ antialias: true, powerPreference: 'high-performance' }}
-      style={{
-        background:
-          'radial-gradient(ellipse at 50% 40%, #4a6a9c 0%, #2a3e5e 35%, #14213a 70%, #0a1326 100%)',
-      }}
-    >
-      <ambientLight intensity={0.95} color="#dbe7ff" />
-      <directionalLight position={[250, 180, 220]} intensity={1.6} color="#ffffff" />
-      <directionalLight position={[-200, -100, -150]} intensity={0.55} color="#88aaff" />
-      <hemisphereLight color="#cfe0ff" groundColor="#1a2540" intensity={0.5} />
-      <Stars radius={900} depth={120} count={5000} factor={4} saturation={0} fade speed={0.3} />
-      <GlobeInner controlsRef={controlsRef} markers={markers} tick={tick} isGrabbingRef={isGrabbingRef} />
-    </Canvas>
+    <div className="absolute inset-0">
+      <div
+        ref={containerRef}
+        style={{
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          background:
+            'radial-gradient(ellipse at 50% 40%, #4a6a9c 0%, #2a3e5e 35%, #14213a 70%, #0a1326 100%)',
+        }}
+      />
+      <div
+        ref={overlayRef}
+        className="pointer-events-none absolute inset-0"
+        style={{
+          opacity: 0,
+          background:
+            'radial-gradient(ellipse at 50% 50%, rgba(165,216,255,0.35) 0%, rgba(165,216,255,0) 60%)',
+          mixBlendMode: 'screen',
+        }}
+      />
+    </div>
   );
 }
