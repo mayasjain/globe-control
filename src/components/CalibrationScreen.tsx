@@ -2,7 +2,14 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import type { HandLandmarkerResult } from '@mediapipe/tasks-vision';
 import { useHandLandmarker } from '../hooks/useHandLandmarker';
 import { drawLandmarks, clearCanvas } from '../utils/landmarkUtils';
-import { isPinching, isOpenPalm } from '../utils/gestureMath';
+import {
+  isPinching,
+  isOpenPalm,
+  pinchDistance,
+  fingerExtensionRatio,
+  LM,
+} from '../utils/gestureMath';
+import { profileFromSamples, saveProfile } from '../utils/calibrationProfile';
 import type { HandLandmarks } from '../types/mediapipe';
 
 type Step = 'detecting' | 'open-palm' | 'pinch' | 'done';
@@ -33,6 +40,10 @@ export function CalibrationScreen({ videoEl, onComplete }: CalibrationScreenProp
   const holdRef = useRef(0);
   const completedRef = useRef(false);
 
+  // Per-user samples collected while the user holds the gesture.
+  const pinchSamples = useRef<number[]>([]);
+  const extSamples = useRef<number[]>([]);
+
   // Mount video into our container (we own it during calibration)
   useEffect(() => {
     if (!containerRef.current) return;
@@ -60,6 +71,22 @@ export function CalibrationScreen({ videoEl, onComplete }: CalibrationScreenProp
     else if (current === 'open-palm' && lm) pass = isOpenPalm(lm);
     else if (current === 'pinch' && lm) pass = isPinching(lm);
 
+    // Sample for personalized thresholds while user is holding the gesture.
+    if (pass && lm) {
+      if (current === 'open-palm') {
+        const ratios = [
+          fingerExtensionRatio(lm, LM.INDEX_TIP, LM.INDEX_MCP),
+          fingerExtensionRatio(lm, LM.MIDDLE_TIP, LM.MIDDLE_MCP),
+          fingerExtensionRatio(lm, LM.RING_TIP, LM.RING_MCP),
+          fingerExtensionRatio(lm, LM.PINKY_TIP, LM.PINKY_MCP),
+        ].sort((a, b) => a - b);
+        // Use the weakest two — the most likely to fail isOpenPalm in real use.
+        extSamples.current.push(ratios[0], ratios[1]);
+      } else if (current === 'pinch') {
+        pinchSamples.current.push(pinchDistance(lm));
+      }
+    }
+
     if (pass) {
       holdRef.current = Math.min(HOLD_FRAMES_REQUIRED, holdRef.current + 1);
     } else {
@@ -74,6 +101,8 @@ export function CalibrationScreen({ videoEl, onComplete }: CalibrationScreenProp
       setStep(next);
       if (next === 'done' && !completedRef.current) {
         completedRef.current = true;
+        const profile = profileFromSamples(pinchSamples.current, extSamples.current);
+        saveProfile(profile);
         setTimeout(() => onComplete(), 900);
       }
     }

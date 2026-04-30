@@ -15,15 +15,14 @@ export const LM = {
 } as const;
 
 // ── Tunable thresholds ────────────────────────────────────────────────────────
+// Defaults used when no per-user CalibrationProfile is loaded. PINCH_ENTER /
+// PINCH_EXIT are overridden per-user; the rest are global.
 export const THRESHOLDS = {
   PINCH_ENTER: 0.07,         // enter pinch when thumb↔index < this
   PINCH_EXIT:  0.22,         // exit pinch when thumb↔index > this (hysteresis)
   DEAD_ZONE: 0.003,          // per-frame velocity dead zone
-  PALM_SENSITIVITY: 0.85,    // velocity multiplier for palm swipe → rotation
-  PINCH_ZOOM_SENSITIVITY: 6, // pinch distance velocity → altitude change
   TWO_HAND_SENSITIVITY: 8,   // two-hand spread velocity → altitude change
   GESTURE_CONFIRM_FRAMES: 3,
-  SMOOTHING_ALPHA: 0.25,
   TAU_ROT: 0.12, // seconds — rotation glide time constant
   TAU_ALT: 0.18, // seconds — zoom glide time constant
 };
@@ -47,8 +46,8 @@ export function pinchDistance(lm: HandLandmarks): number {
   return dist2D(lm[LM.THUMB_TIP], lm[LM.INDEX_TIP]);
 }
 /** Stateless quick check used during calibration only */
-export function isPinching(lm: HandLandmarks): boolean {
-  return pinchDistance(lm) < THRESHOLDS.PINCH_ENTER;
+export function isPinching(lm: HandLandmarks, enterThreshold = THRESHOLDS.PINCH_ENTER): boolean {
+  return pinchDistance(lm) < enterThreshold;
 }
 
 /**
@@ -56,23 +55,27 @@ export function isPinching(lm: HandLandmarks): boolean {
  * Ratio = dist(tip → wrist) / dist(mcp → wrist).
  * Extended finger: ratio ≈ 2.0+. Curled finger: ratio ≈ 0.9–1.2.
  */
-function fingerExtensionRatio(lm: HandLandmarks, tipIdx: number, mcpIdx: number): number {
+export function fingerExtensionRatio(lm: HandLandmarks, tipIdx: number, mcpIdx: number): number {
   const tipDist = dist2D(lm[tipIdx], lm[LM.WRIST]);
   const mcpDist = dist2D(lm[mcpIdx], lm[LM.WRIST]);
   if (mcpDist < 1e-6) return 1;
   return tipDist / mcpDist;
 }
 
-const EXT_THRESHOLD = 1.5; // ratio above this = finger extended
+export const DEFAULT_EXT_THRESHOLD = 1.5; // ratio above this = finger extended
 
-export function isOpenPalm(lm: HandLandmarks): boolean {
+export function isOpenPalm(
+  lm: HandLandmarks,
+  extThreshold = DEFAULT_EXT_THRESHOLD,
+  pinchEnter = THRESHOLDS.PINCH_ENTER,
+): boolean {
   const r1 = fingerExtensionRatio(lm, LM.INDEX_TIP,  LM.INDEX_MCP);
   const r2 = fingerExtensionRatio(lm, LM.MIDDLE_TIP, LM.MIDDLE_MCP);
   const r3 = fingerExtensionRatio(lm, LM.RING_TIP,   LM.RING_MCP);
   const r4 = fingerExtensionRatio(lm, LM.PINKY_TIP,  LM.PINKY_MCP);
-  // All four fingers extended (lenient: at least 3 of 4 strongly extended)
-  const extendedCount = [r1, r2, r3, r4].filter((r) => r > EXT_THRESHOLD).length;
-  return extendedCount >= 3 && !isPinching(lm);
+  // Lenient: at least 3 of 4 strongly extended.
+  const extendedCount = [r1, r2, r3, r4].filter((r) => r > extThreshold).length;
+  return extendedCount >= 3 && !isPinching(lm, pinchEnter);
 }
 
 export function isFist(lm: HandLandmarks): boolean {

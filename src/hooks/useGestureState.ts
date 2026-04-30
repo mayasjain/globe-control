@@ -9,40 +9,57 @@ import {
   applyDeadZone,
   THRESHOLDS,
 } from '../utils/gestureMath';
-import { EMA } from '../utils/smoothing';
+import { OneEuroFilter } from '../utils/oneEuro';
+import { DEFAULT_PROFILE, type CalibrationProfile } from '../utils/calibrationProfile';
+
+// If the hand disappears for less than this, hold state — don't end the grab.
+const LOST_TRACK_GRACE_MS = 200;
+
+interface UseGestureStateOptions {
+  profile?: CalibrationProfile;
+  onGestureChange: (g: GestureType) => void;
+  onGrabStart: (x: number, y: number) => void;
+  onGrabMove: (x: number, y: number) => void;
+  onGrabEnd: () => void;
+}
 
 interface GestureStateRefs {
   gestureStateRef: React.MutableRefObject<GestureState>;
   processResult: (result: HandLandmarkerResult) => void;
 }
 
-export function useGestureState(
-  onGestureChange: (g: GestureType) => void,
-): GestureStateRefs {
+export function useGestureState(opts: UseGestureStateOptions): GestureStateRefs {
   const gestureStateRef = useRef<GestureState>({
     gesture: 'idle',
     deltaX: 0,
     deltaY: 0,
-    zoom: 0.5,
+    zoom: 0,
     twoHandDistance: null,
   });
 
-  const smoothX = useRef(new EMA(0.5, THRESHOLDS.SMOOTHING_ALPHA));
-  const smoothY = useRef(new EMA(0.5, THRESHOLDS.SMOOTHING_ALPHA));
-  const smoothPinch = useRef(new EMA(0.15, THRESHOLDS.SMOOTHING_ALPHA));
-  const smoothTwoHand = useRef(new EMA(0, THRESHOLDS.SMOOTHING_ALPHA));
+  // Keep callbacks in refs so identity churn doesn't invalidate processResult.
+  const cbRef = useRef(opts);
+  useEffect(() => { cbRef.current = opts; }, [opts]);
 
-  // Per-frame velocity tracking
-  const lastX = useRef<number | null>(null);
-  const lastY = useRef<number | null>(null);
-  const lastPinch = useRef<number | null>(null);
+  const profileRef = useRef<CalibrationProfile>(opts.profile ?? DEFAULT_PROFILE);
+  useEffect(() => {
+    profileRef.current = opts.profile ?? DEFAULT_PROFILE;
+  }, [opts.profile]);
+
+  // One-Euro filters: heavy smoothing at rest, responsive during motion.
+  const smoothX = useRef(new OneEuroFilter({ minCutoff: 1.0, beta: 0.05 }));
+  const smoothY = useRef(new OneEuroFilter({ minCutoff: 1.0, beta: 0.05 }));
+  const smoothPinch = useRef(new OneEuroFilter({ minCutoff: 1.5, beta: 0.04 }));
+  const smoothTwoHand = useRef(new OneEuroFilter({ minCutoff: 1.0, beta: 0.05 }));
+
   const lastTwoHand = useRef<number | null>(null);
 
-  // Stateful pinch with hysteresis
+  // Stateful pinch with hysteresis. While true, we are in a "grab".
   const isPinchActive = useRef(false);
-
-  const onChangeRef = useRef(onGestureChange);
-  useEffect(() => { onChangeRef.current = onGestureChange; }, [onGestureChange]);
+  // Last palm position seen — used to keep firing onGrabMove during grace.
+  const lastPalm = useRef<{ x: number; y: number } | null>(null);
+  // When did we last see zero hands? null = currently tracking.
+  const lostSinceMs = useRef<number | null>(null);
 
   const pendingGesture = useRef<GestureType>('idle');
   const pendingCount = useRef(0);
@@ -58,11 +75,7 @@ export function useGestureState(
       if (pendingCount.current >= THRESHOLDS.GESTURE_CONFIRM_FRAMES) {
         pendingCount.current = 0;
         currentGesture.current = raw;
-        onChangeRef.current(raw);
-        // Reset velocity tracking on transition
-        lastX.current = null;
-        lastY.current = null;
-        lastPinch.current = null;
+        cbRef.current.onGestureChange(raw);
         lastTwoHand.current = null;
       }
     } else {
@@ -74,24 +87,53 @@ export function useGestureState(
 
   const processResult = useCallback((result: HandLandmarkerResult) => {
     const hands = result.landmarks;
+    const now = performance.now();
+    const profile = profileRef.current;
 
+    // ── Lost-track grace ──────────────────────────────────────────────────
     if (!hands || hands.length === 0) {
+      if (lostSinceMs.current === null) lostSinceMs.current = now;
+      const lostFor = now - lostSinceMs.current;
+
+      if (lostFor < LOST_TRACK_GRACE_MS) {
+        // Hold gesture state. If we were grabbing, keep firing onGrabMove with
+        // the last palm position so the globe target doesn't snap back.
+        if (isPinchActive.current && lastPalm.current) {
+          cbRef.current.onGrabMove(lastPalm.current.x, lastPalm.current.y);
+        }
+        return;
+      }
+
+      // Grace expired — commit reset.
+      if (isPinchActive.current) {
+        isPinchActive.current = false;
+        cbRef.current.onGrabEnd();
+      }
       confirmGesture('idle');
-      isPinchActive.current = false;
-      lastX.current = lastY.current = lastPinch.current = lastTwoHand.current = null;
+      lastTwoHand.current = null;
+      lastPalm.current = null;
+      smoothX.current.reset();
+      smoothY.current.reset();
+      smoothPinch.current.reset();
+      smoothTwoHand.current.reset();
       gestureStateRef.current = { gesture: 'idle', deltaX: 0, deltaY: 0, zoom: 0, twoHandDistance: null };
       return;
     }
 
+    lostSinceMs.current = null;
     const lm0 = hands[0];
 
-    // ── Two-hand spread → zoom ──
+    // ── Two-hand spread → zoom ───────────────────────────────────────────
     if (hands.length === 2) {
-      isPinchActive.current = false;
+      // Two hands cancel any in-progress grab.
+      if (isPinchActive.current) {
+        isPinchActive.current = false;
+        cbRef.current.onGrabEnd();
+      }
       const c0 = palmCenter(hands[0]);
       const c1 = palmCenter(hands[1]);
       const rawDist = dist2D({ x: c0.x, y: c0.y, z: 0 }, { x: c1.x, y: c1.y, z: 0 });
-      const smoothed = smoothTwoHand.current.update(rawDist);
+      const smoothed = smoothTwoHand.current.update(rawDist, now);
       let velocity = 0;
       if (lastTwoHand.current !== null) {
         velocity = (smoothed - lastTwoHand.current) * THRESHOLDS.TWO_HAND_SENSITIVITY;
@@ -106,59 +148,54 @@ export function useGestureState(
     }
     lastTwoHand.current = null;
 
-    // ── Stateful pinch detection (hysteresis) ──
-    const rawPinch = pinchDistance(lm0);
-    const smoothedPinch = smoothPinch.current.update(rawPinch);
+    // ── Single-hand: pinch hysteresis + grab events ──────────────────────
+    const palm = palmCenter(lm0);
+    const sx = smoothX.current.update(palm.x, now);
+    const sy = smoothY.current.update(palm.y, now);
+    lastPalm.current = { x: sx, y: sy };
 
-    if (!isPinchActive.current && smoothedPinch < THRESHOLDS.PINCH_ENTER) {
+    const rawPinch = pinchDistance(lm0);
+    const smoothedPinch = smoothPinch.current.update(rawPinch, now);
+
+    const wasPinching = isPinchActive.current;
+    if (!isPinchActive.current && smoothedPinch < profile.pinchEnter) {
       isPinchActive.current = true;
-      lastPinch.current = smoothedPinch;
-    } else if (isPinchActive.current && smoothedPinch > THRESHOLDS.PINCH_EXIT) {
+    } else if (isPinchActive.current && smoothedPinch > profile.pinchExit) {
       isPinchActive.current = false;
+    }
+
+    if (!wasPinching && isPinchActive.current) {
+      cbRef.current.onGrabStart(sx, sy);
+    } else if (wasPinching && !isPinchActive.current) {
+      cbRef.current.onGrabEnd();
+    } else if (isPinchActive.current) {
+      cbRef.current.onGrabMove(sx, sy);
     }
 
     let rawGesture: GestureType = 'idle';
     if (isPinchActive.current) rawGesture = 'pinch';
-    else if (isOpenPalm(lm0)) rawGesture = 'open-palm';
+    else if (isOpenPalm(lm0, profile.extThreshold, profile.pinchEnter)) rawGesture = 'open-palm';
 
     const gesture = confirmGesture(rawGesture);
 
-    const palm = palmCenter(lm0);
-    const sx = smoothX.current.update(palm.x);
-    const sy = smoothY.current.update(palm.y);
+    // Live numeric feedback for the HUD: pinch closeness (0 closed → 1 open),
+    // normalized against the user's calibrated band.
+    const pinchClose = clamp01(
+      (smoothedPinch - profile.pinchEnter) / (profile.pinchExit - profile.pinchEnter),
+    );
 
-    if (gesture === 'open-palm') {
-      let vx = 0, vy = 0;
-      if (lastX.current !== null && lastY.current !== null) {
-        vx = (sx - lastX.current) * THRESHOLDS.PALM_SENSITIVITY;
-        vy = (sy - lastY.current) * THRESHOLDS.PALM_SENSITIVITY;
-        vx = applyDeadZone(vx, THRESHOLDS.DEAD_ZONE);
-        vy = applyDeadZone(vy, THRESHOLDS.DEAD_ZONE);
-      }
-      lastX.current = sx; lastY.current = sy;
-      gestureStateRef.current = {
-        gesture, deltaX: -vx, deltaY: vy, zoom: 0, twoHandDistance: null,
-      };
-    } else if (gesture === 'pinch') {
-      // Velocity-based pinch zoom: distance decreasing = zoom in (negative altitude delta)
-      let zoomVel = 0;
-      if (lastPinch.current !== null) {
-        // Inverted: closing pinch (negative delta) → zoom IN → negative altitude change
-        zoomVel = (smoothedPinch - lastPinch.current) * THRESHOLDS.PINCH_ZOOM_SENSITIVITY;
-        zoomVel = applyDeadZone(zoomVel, THRESHOLDS.DEAD_ZONE);
-      }
-      lastPinch.current = smoothedPinch;
-      lastX.current = lastY.current = null;
-      gestureStateRef.current = {
-        gesture, deltaX: 0, deltaY: 0, zoom: zoomVel, twoHandDistance: null,
-      };
-    } else {
-      lastX.current = lastY.current = lastPinch.current = null;
-      gestureStateRef.current = {
-        gesture, deltaX: 0, deltaY: 0, zoom: 0, twoHandDistance: null,
-      };
-    }
+    gestureStateRef.current = {
+      gesture,
+      deltaX: 0,
+      deltaY: 0,
+      zoom: pinchClose,
+      twoHandDistance: null,
+    };
   }, []);
 
   return { gestureStateRef, processResult };
+}
+
+function clamp01(v: number): number {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
 }

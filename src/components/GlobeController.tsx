@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import type { HandLandmarkerResult } from '@mediapipe/tasks-vision';
 import { useHandLandmarker } from '../hooks/useHandLandmarker';
 import { useGestureState } from '../hooks/useGestureState';
@@ -10,47 +10,81 @@ import { DebugPanel } from './DebugPanel';
 import { GLOBE_MARKERS } from '../data/globeMarkers';
 import type { GestureType } from '../types/gestures';
 import type { HandLandmarks } from '../types/mediapipe';
+import { DEFAULT_PROFILE, type CalibrationProfile } from '../utils/calibrationProfile';
 
 interface GlobeControllerProps {
   videoEl: HTMLVideoElement | null;
   showDebug: boolean;
+  profile?: CalibrationProfile;
 }
 
-export function GlobeController({ videoEl, showDebug }: GlobeControllerProps) {
+const AUTO_PAUSE_AFTER_MS = 1500;
+
+export function GlobeController({ videoEl, showDebug, profile }: GlobeControllerProps) {
   const activeGestureRef = useRef<GestureType>('idle');
   const landmarksRef = useRef<HandLandmarks[]>([]);
+  const lastHandSeenAtRef = useRef<number>(performance.now());
+
+  const { controlsRef, isGrabbingRef, isPausedRef, beginGrab, updateGrab, endGrab, applyTwoHandZoom, tick } =
+    useGlobeControls();
 
   const onGestureChange = useCallback((g: GestureType) => {
     activeGestureRef.current = g;
   }, []);
 
-  const { gestureStateRef, processResult } = useGestureState(onGestureChange);
-  const { controlsRef, applyDelta, applyZoomVelocity, applyTwoHandZoom, tick } = useGlobeControls();
+  const gestureOpts = useMemo(
+    () => ({
+      profile: profile ?? DEFAULT_PROFILE,
+      onGestureChange,
+      onGrabStart: beginGrab,
+      onGrabMove: updateGrab,
+      onGrabEnd: endGrab,
+    }),
+    [profile, onGestureChange, beginGrab, updateGrab, endGrab],
+  );
+
+  const { gestureStateRef, processResult } = useGestureState(gestureOpts);
 
   const handleResult = useCallback(
     (result: HandLandmarkerResult) => {
-      landmarksRef.current = (result.landmarks as HandLandmarks[]) ?? [];
+      const lms = (result.landmarks as HandLandmarks[]) ?? [];
+      landmarksRef.current = lms;
+
+      const now = performance.now();
+      if (lms.length > 0) {
+        lastHandSeenAtRef.current = now;
+        if (isPausedRef.current) isPausedRef.current = false;
+      } else if (now - lastHandSeenAtRef.current > AUTO_PAUSE_AFTER_MS) {
+        isPausedRef.current = true;
+      }
+
       processResult(result);
 
       const state = gestureStateRef.current;
-      if (state.gesture === 'open-palm') {
-        applyDelta(state.deltaX, state.deltaY);
-      } else if (state.gesture === 'pinch') {
-        applyZoomVelocity(state.zoom);
-      } else if (state.gesture === 'two-hand-spread' && state.twoHandDistance !== null) {
+      if (state.gesture === 'two-hand-spread' && state.twoHandDistance !== null) {
         applyTwoHandZoom(state.twoHandDistance);
       }
     },
-    [processResult, gestureStateRef, applyDelta, applyZoomVelocity, applyTwoHandZoom],
+    [processResult, gestureStateRef, applyTwoHandZoom, isPausedRef],
   );
 
   useHandLandmarker({ videoEl, onResult: handleResult, enabled: !!videoEl });
 
   return (
     <>
-      <GlobeScene controlsRef={controlsRef} markers={GLOBE_MARKERS} tick={tick} />
+      <GlobeScene
+        controlsRef={controlsRef}
+        markers={GLOBE_MARKERS}
+        tick={tick}
+        isGrabbingRef={isGrabbingRef}
+      />
       <CameraPreview videoEl={videoEl} landmarksRef={landmarksRef} />
-      <GestureOverlay gestureRef={activeGestureRef} />
+      <GestureOverlay
+        gestureRef={activeGestureRef}
+        gestureStateRef={gestureStateRef}
+        isPausedRef={isPausedRef}
+        isGrabbingRef={isGrabbingRef}
+      />
       {showDebug && (
         <DebugPanel
           gestureStateRef={gestureStateRef}

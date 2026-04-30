@@ -53,6 +53,12 @@ export function useHandLandmarker({
 
       function loop() {
         if (destroyed) return;
+        // Skip inference entirely when the tab is hidden — saves CPU/GPU and
+        // avoids stale state on tab return.
+        if (typeof document !== 'undefined' && document.hidden) {
+          rafId = requestAnimationFrame(loop);
+          return;
+        }
         if (!videoEl || videoEl.readyState < 2 || !landmarker) {
           rafId = requestAnimationFrame(loop);
           return;

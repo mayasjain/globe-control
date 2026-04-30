@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { PermissionGate } from '../components/PermissionGate';
 import { CalibrationScreen } from '../components/CalibrationScreen';
 import { GlobeController } from '../components/GlobeController';
+import { loadProfile, clearProfile, type CalibrationProfile } from '../utils/calibrationProfile';
 
 type Phase = 'permission' | 'calibration' | 'globe';
 
@@ -9,14 +10,24 @@ export default function App() {
   const [phase, setPhase] = useState<Phase>('permission');
   const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
   const [showDebug, setShowDebug] = useState(true); // default-on for diagnosis
+  // Returning users with a saved profile skip CalibrationScreen entirely.
+  const [profile, setProfile] = useState<CalibrationProfile | null>(() => loadProfile());
 
   const handleGranted = useCallback((el: HTMLVideoElement) => {
     setVideoEl(el);
-    setPhase('calibration');
-  }, []);
+    setPhase(profile ? 'globe' : 'calibration');
+  }, [profile]);
 
   const handleCalibrated = useCallback(() => {
+    // CalibrationScreen has already saved the profile; re-read it.
+    setProfile(loadProfile());
     setPhase('globe');
+  }, []);
+
+  const handleRecalibrate = useCallback(() => {
+    clearProfile();
+    setProfile(null);
+    setPhase('calibration');
   }, []);
 
   return (
@@ -29,20 +40,22 @@ export default function App() {
 
       {phase === 'globe' && videoEl && (
         <>
-          <GlobeController videoEl={videoEl} showDebug={showDebug} />
+          <GlobeController videoEl={videoEl} showDebug={showDebug} profile={profile ?? undefined} />
 
-          <div className="fixed bottom-5 left-5 z-10 text-white/50 text-xs space-y-1 pointer-events-none">
-            <p>🖐 Open palm — swipe to rotate</p>
-            <p>🤌 Pinch in / out — zoom</p>
-            <p>↔ Two hands apart — zoom</p>
+          <div className="fixed top-5 right-5 z-20 flex gap-2">
+            <button
+              onClick={handleRecalibrate}
+              className="px-3 py-1 rounded-lg bg-white/5 border border-white/10 text-white/40 text-xs hover:text-white/70 transition-colors"
+            >
+              Recalibrate
+            </button>
+            <button
+              onClick={() => setShowDebug((v) => !v)}
+              className="px-3 py-1 rounded-lg bg-white/5 border border-white/10 text-white/40 text-xs hover:text-white/70 transition-colors"
+            >
+              {showDebug ? 'Hide Debug' : 'Debug'}
+            </button>
           </div>
-
-          <button
-            onClick={() => setShowDebug((v) => !v)}
-            className="fixed top-5 right-5 z-20 px-3 py-1 rounded-lg bg-white/5 border border-white/10 text-white/40 text-xs hover:text-white/70 transition-colors"
-          >
-            {showDebug ? 'Hide Debug' : 'Debug'}
-          </button>
         </>
       )}
     </div>

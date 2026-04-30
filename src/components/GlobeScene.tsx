@@ -12,9 +12,10 @@ interface GlobeInnerProps {
   controlsRef: React.MutableRefObject<GlobeControlValues>;
   markers: GlobeMarker[];
   tick: (dt: number) => void;
+  isGrabbingRef?: React.MutableRefObject<boolean>;
 }
 
-function GlobeInner({ controlsRef, markers, tick }: GlobeInnerProps) {
+function GlobeInner({ controlsRef, markers, tick, isGrabbingRef }: GlobeInnerProps) {
   const { scene, camera } = useThree();
   const globeRef = useRef<ThreeGlobe | null>(null);
   const cloudsRef = useRef<THREE.Mesh | null>(null);
@@ -89,6 +90,15 @@ function GlobeInner({ controlsRef, markers, tick }: GlobeInnerProps) {
     if (!globeRef.current) return;
     tick(dt);
     if (cloudsRef.current) cloudsRef.current.rotation.y += dt * 0.012;
+
+    // Grab affordance: when held, lift the atmosphere slightly so the user
+    // sees the globe respond. Cheap and unambiguous.
+    if (isGrabbingRef && globeRef.current) {
+      const targetAlt = isGrabbingRef.current ? 0.36 : 0.28;
+      const cur = globeRef.current.atmosphereAltitude();
+      globeRef.current.atmosphereAltitude(cur + (targetAlt - cur) * Math.min(1, dt * 6));
+    }
+
     const { lat, lng, altitude } = controlsRef.current;
 
     const phi = (90 - lat) * (Math.PI / 180);
@@ -117,9 +127,10 @@ interface GlobeSceneProps {
   controlsRef: React.MutableRefObject<GlobeControlValues>;
   markers: GlobeMarker[];
   tick: (dt: number) => void;
+  isGrabbingRef?: React.MutableRefObject<boolean>;
 }
 
-export function GlobeScene({ controlsRef, markers, tick }: GlobeSceneProps) {
+export function GlobeScene({ controlsRef, markers, tick, isGrabbingRef }: GlobeSceneProps) {
   return (
     <Canvas
       camera={{ position: [0, 0, 350], fov: 45, near: 0.1, far: 5000 }}
@@ -134,7 +145,7 @@ export function GlobeScene({ controlsRef, markers, tick }: GlobeSceneProps) {
       <directionalLight position={[-200, -100, -150]} intensity={0.55} color="#88aaff" />
       <hemisphereLight color="#cfe0ff" groundColor="#1a2540" intensity={0.5} />
       <Stars radius={900} depth={120} count={5000} factor={4} saturation={0} fade speed={0.3} />
-      <GlobeInner controlsRef={controlsRef} markers={markers} tick={tick} />
+      <GlobeInner controlsRef={controlsRef} markers={markers} tick={tick} isGrabbingRef={isGrabbingRef} />
     </Canvas>
   );
 }
