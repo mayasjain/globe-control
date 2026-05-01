@@ -6,10 +6,12 @@ Control a 3D Earth globe with your hand gestures — runs entirely in the browse
 
 | Gesture | Action |
 |---|---|
-| 🖐 Open palm + move | Rotate the globe |
-| 🤌 Pinch (thumb + index) | Zoom in/out |
-| ✊ Fist | Pause movement |
+| 🤌 Pinch (thumb + index) | Grab the globe; drag to rotate, release to coast |
 | ↔ Two hands apart/together | Zoom in/out |
+| 🖐 Open palm | Ready state — HUD shows "ready to grab" |
+| No hand for >1.5s | Auto-pause; inertia halts |
+
+First-time users are walked through a short calibration (open palm → pinch) so thresholds match their hand. The profile is saved to `localStorage`; use the **Recalibrate** button on the globe screen to redo it.
 
 ## Setup
 
@@ -44,17 +46,19 @@ The built `dist/` folder is a static site — deploy to Vercel or Netlify with z
 ## Tech stack
 
 - React 19 + Vite + TypeScript
-- React Three Fiber + Drei
-- three-globe
+- MapLibre GL for globe rendering
 - MediaPipe Tasks Vision (hand tracking)
 - Tailwind CSS v4
 
 ## MVP scope
 
-- [x] Static 3D globe with city markers
+- [x] 3D globe with city markers
 - [x] Camera permission screen
+- [x] Per-user calibration flow with persisted profile
 - [x] MediaPipe hand landmark detection
-- [x] Rule-based gesture recognition (pinch, palm, fist, two-hand)
-- [x] Gesture → globe rotation + zoom
+- [x] Rule-based gesture recognition (pinch-grab, open palm, two-hand)
+- [x] Grab-and-drag rotation with release inertia
+- [x] Two-hand spread → zoom
+- [x] One-Euro filtering + lost-track grace + tab-visibility pause
 - [x] Gesture overlay UI
 - [x] Toggleable debug panel (FPS, landmarks, control values)
